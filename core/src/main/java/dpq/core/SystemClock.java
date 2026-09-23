@@ -15,4 +15,10 @@ public final class SystemClock implements Clock {
     public Instant wallTime() {
         return Instant.now();
     }
+
+    @Override
+    public Instant wallTimeAt(long monotonicMillis) {
+        // Offsets from "now" on both scales, so wall-clock steps apply to the displayed time too.
+        return Instant.now().minusMillis(monotonicMillis() - monotonicMillis);
+    }
 }

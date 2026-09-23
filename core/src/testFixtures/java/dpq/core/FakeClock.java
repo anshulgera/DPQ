@@ -31,4 +31,9 @@ public final class FakeClock implements Clock {
     public Instant wallTime() {
         return start.plusMillis(elapsedMillis.get());
     }
+
+    @Override
+    public Instant wallTimeAt(long monotonicMillis) {
+        return start.plusMillis(monotonicMillis);
+    }
 }
