@@ -112,8 +112,10 @@ class PartitionTtlTest {
         partition.enqueue("m", Priority.HIGH, TTL); // expires at 60s
         partition.dequeue().orElseThrow();
         clock.advance(VISIBILITY); // lease expires at 30s, TTL not passed: redelivered
+        partition.drainExpired(Integer.MAX_VALUE);
 
         assertThat(partition.readyCount(Priority.HIGH)).isEqualTo(1);
+        assertThat(partition.ttlDeadlineCount()).isEqualTo(1); // TTL deadline re-added on redelivery
         clock.advance(TTL.minus(VISIBILITY)); // 60s: TTL passes while ready again
 
         assertThat(partition.dequeue()).isEmpty();
