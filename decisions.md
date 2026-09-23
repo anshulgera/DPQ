@@ -33,9 +33,9 @@ The requirements are in `Requirements.txt`; the implementation plan is in `plan.
   - Metrics registry wiring, validation and error mapping are written by hand (small).
   - gRPC can be added later as a second adapter over the same core.
 
-## D3 — Storage and durability: in-memory behind a pluggable seam
+## D3 — Storage and durability: in-memory
 
-- **Decision:** all state lives in memory, behind a store/journal seam. Durability through a write-ahead log (WAL) plus replication is described as the production path (D15b), not implemented.
+- **Decision:** all state lives in memory. Durability through a write-ahead log (WAL) plus replication is described as the production path (D15b), not implemented.
 - **Options considered:**
   - Pure in-memory.
   - In-memory plus a WAL file with replay on startup.
@@ -44,7 +44,7 @@ The requirements are in `Requirements.txt`; the implementation plan is in `plan.
   - The grading priorities are correctness, concurrency and data-model clarity.
   - A WAL adds replay, fsync-policy and compaction concerns, roughly two more PRs, without improving what is evaluated first.
   - An embedded database would hand concurrency over to the database and hide the in-memory data structures the reviewers want to see.
-  - The seam makes "add persistence" a clean extension.
+  - Every state change goes through a few `Partition` methods under one lock, so those methods are where WAL appends would go. There is no separate storage interface; adding one before there is a second implementation would be speculative.
 - **Consequences:**
   - A process crash loses all messages. The README states this plainly and explains what production would add.
 
@@ -337,7 +337,7 @@ The gap is **durability** (D3), not scale. A single hot queue needs partitions, 
   | `dpq_messages_dead_lettered_total` | counter | – |
   | `dpq_messages_expired_total` | counter | `priority` |
   | `dpq_enqueue_rejected_total` | counter | – |
-  | `dpq_operation_duration_seconds` | histogram | `op` (enqueue, dequeue, ack); recorded in the HTTP layer |
+  | `dpq_operation_duration_seconds` | histogram | `queue`, `op` (enqueue, dequeue, ack); recorded in the HTTP layer. About 40k series at the 1,000-queue cap (queues × 3 ops × 13 buckets). |
 
   - Oldest age **by priority** shows LOW starvation under strict priority (D7). The spec's per-queue value is the maximum across priorities, which the JSON endpoint reports as well.
   - `delivered_total` gives consumer throughput; `dequeue_empty_total` shows wasted polling (D10).
@@ -439,7 +439,7 @@ The gap is **durability** (D3), not scale. A single hot queue needs partitions, 
   - With N partitions on different nodes, consumers are **assigned partitions** (Kafka-style, through the placement service) rather than the server fanning each dequeue out across nodes. Priority is strict within a partition and approximate across partitions.
 - **Why:**
   - These are the proven designs behind Kafka, SQS-style services and etcd.
-  - D3's seam and D11a's IDs are the extension points.
+  - D3's single-lock state-change methods (the WAL append points) and D11a's IDs are the extension points.
 - **Consequences:** the README must state clearly what the current in-memory build guarantees: at-least-once delivery within a process lifetime, and loss on a crash.
 
 ## D16 — Delivery workflow: stacked PRs
@@ -495,3 +495,4 @@ These gaps came up when the execution session started. The author resolved them,
 - **D18i — Expiry is judged at the deadline, not at drain time (refines D6, D8d):** the D8d lease-expiry rows are evaluated at the lease deadline, so the outcome doesn't depend on when a drain or the reaper happens to run. A lease that ended before the TTL is redelivered or dead-lettered even if the drain runs after the TTL. A dead-lettered message's `deadLetteredAt` (and its DLQ `enqueuedAt` and age) is the lease deadline. Found by the model-based tests (PR 8).
 - **D18j — One clock reading per operation (refines D6):** each partition operation reads the monotonic clock once and uses that instant throughout. Displayed times (`enqueuedAt`, `visibleUntil`, `deadLetteredAt`) come from `Clock.wallTimeAt(monotonicInstant)` rather than a second wall-clock read, so `visibleUntil` is exactly when the lease ends. Found by the conservation stress test (PR 9).
 - **D18k — Due lane heads are expired before serving (refines D6):** a bounded drain can leave due TTLs behind, so `dequeue` and the metrics snapshot also expire every lane head whose TTL has passed before reading it. An expired message is therefore never delivered and never counted as the oldest, whatever the drain limit. Ready counts may still include expired messages deeper in a lane until a drain or the reaper reaches them. Found in review: the model-based tests ran with an unlimited drain, so they never exercised the bounded path.
+- **D18l — Package layout (refines D14a):** `dpq.core` keeps the `QueueService` facade and the package-private engine (`Partition`, `Lane`, `Message`, `Reaper`, counters, `SelectionPolicy`). The public value types move to `dpq.core.model`, the exceptions to `dpq.core.error`, the generators to `dpq.core.id` and `Clock` to `dpq.core.time`. The engine stays in one package because package-private visibility is what hides its internals; splitting it would force them to be `public`.
