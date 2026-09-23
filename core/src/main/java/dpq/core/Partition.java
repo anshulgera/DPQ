@@ -1,6 +1,7 @@
 package dpq.core;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashMap;
@@ -11,10 +12,10 @@ import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * One partition of a queue (D4, D5, D5b). A single {@link ReentrantLock} guards all of its mutable state, so
- * the lanes, the message index, the lease map and the deadline set always change together.
+ * the lanes, the message index, the lease map and the deadline sets always change together.
  *
- * <p>Every operation first drains up to {@code drainLimit} expired leases, so correctness never depends on a
- * timer; the reaper calls {@link #drainExpired} with no limit to keep idle partitions current (D6).
+ * <p>Every operation first drains up to {@code drainLimit} expired leases and TTLs, so correctness never
+ * depends on a timer; the reaper calls {@link #drainExpired} with no limit to keep idle partitions current (D6).
  *
  * <p>Lock order: a source partition calls its {@link DeadLetterSink} while holding its own lock, and the sink
  * takes the DLQ partition's lock. A DLQ never has a DLQ of its own, so the order is acyclic (D9a).
@@ -23,11 +24,16 @@ final class Partition {
 
     static final int MAX_PAYLOAD_BYTES = 256 * 1024;
     static final int DEFAULT_DRAIN_LIMIT = 256;
+    static final Duration MIN_TTL = Duration.ofSeconds(1);
+    static final Duration MAX_TTL = Duration.ofDays(14);
 
     /** A monotonic deadline; {@code seq} (the message's, unique per partition) breaks ties. */
     private record Deadline(long at, long seq, MessageId id) {}
 
     private record Lease(ReceiptHandle receipt, Deadline deadline) {}
+
+    private static final Comparator<Deadline> DEADLINE_ORDER =
+            Comparator.comparingLong(Deadline::at).thenComparingLong(Deadline::seq);
 
     private final String queueName;
     private final int index;
@@ -44,12 +50,15 @@ final class Partition {
     // Guarded by lock.
     private final EnumMap<Priority, Lane> lanes = new EnumMap<>(Priority.class);
     private final Map<MessageId, Message> messages = new HashMap<>(); // every live message, ready or in flight
+    private final Map<MessageId, Lane.Entry> ready = new HashMap<>(); // lane entry of each ready message
     private final Map<MessageId, Lease> inFlight = new HashMap<>();
-    // Holds exactly one entry per lease; removed on ack or expiry, so it never holds stale deadlines (D4).
-    private final TreeSet<Deadline> visibilityDeadlines =
-            new TreeSet<>(Comparator.comparingLong(Deadline::at).thenComparingLong(Deadline::seq));
+    // Only live deadlines (D4): a lease's entry is removed on ack or expiry; a TTL entry exists only while the
+    // message is ready, so it is removed on dequeue and re-added on redelivery (D9c re-checks TTL at expiry).
+    private final TreeSet<Deadline> visibilityDeadlines = new TreeSet<>(DEADLINE_ORDER);
+    private final TreeSet<Deadline> ttlDeadlines = new TreeSet<>(DEADLINE_ORDER);
     private long nextSeq;
     private long nextDeliverySeq;
+    private int expired;
 
     Partition(String queueName, int index, QueueConfig config, Clock clock, IdGenerator ids,
             ReceiptGenerator receipts, SelectionPolicy policy, DeadLetterSink deadLetters, int drainLimit) {
@@ -68,7 +77,12 @@ final class Partition {
     }
 
     MessageId enqueue(String payload, Priority priority) {
-        validate(payload, priority);
+        return enqueue(payload, priority, null);
+    }
+
+    /** Adds a message; {@code ttl} may be {@code null} for a message that never expires. */
+    MessageId enqueue(String payload, Priority priority, Duration ttl) {
+        validate(payload, priority, ttl);
         lock.lock();
         try {
             drainLocked(drainLimit);
@@ -76,10 +90,12 @@ final class Partition {
                 throw new QueueFullException(queueName, config.maxDepth());
             }
             MessageId id = ids.next(index);
-            long seq = nextSeq++;
-            messages.put(id, new Message(id, payload, priority, seq, clock.monotonicMillis(), clock.wallTime(),
-                    Message.NO_EXPIRY, 0, null));
-            lanes.get(priority).offer(new Lane.Entry(seq, id));
+            long now = clock.monotonicMillis();
+            long expiresAt = ttl == null ? Message.NO_EXPIRY : now + ttl.toMillis();
+            Message message =
+                    new Message(id, payload, priority, nextSeq++, now, clock.wallTime(), expiresAt, 0, null);
+            messages.put(id, message);
+            makeReady(message, false);
             return id;
         } finally {
             lock.unlock();
@@ -95,8 +111,12 @@ final class Partition {
                 return Optional.empty();
             }
             Lane.Entry entry = lane.get().poll().orElseThrow();
+            ready.remove(entry.id());
             Message message = messages.get(entry.id()).delivered();
             messages.put(message.id(), message);
+            if (message.expiresAtMono() != Message.NO_EXPIRY) {
+                ttlDeadlines.remove(ttlDeadline(message));
+            }
 
             ReceiptHandle receipt = receipts.next();
             long timeoutMillis = config.visibilityTimeout().toMillis();
@@ -114,7 +134,8 @@ final class Partition {
     /**
      * Removes an in-flight message. Throws {@link MessageNotFoundException} if it is gone (or never existed) and
      * {@link StaleReceiptException} if the receipt isn't its current lease's, or the lease deadline has passed
-     * whether or not a drain has processed it yet (D8a, D8d).
+     * whether or not a drain has processed it yet (D8a, D8d). A passed TTL doesn't matter here: the lease wins
+     * (D9c).
      */
     void ack(MessageId id, ReceiptHandle receipt) {
         lock.lock();
@@ -137,20 +158,11 @@ final class Partition {
         }
     }
 
-    /** Processes up to {@code limit} expired leases; returns how many it processed. */
+    /** Processes up to {@code limit} expired leases and TTLs, earliest first; returns how many it processed. */
     int drainExpired(int limit) {
         lock.lock();
         try {
             return drainLocked(limit);
-        } finally {
-            lock.unlock();
-        }
-    }
-
-    int visibilityDeadlineCount() {
-        lock.lock();
-        try {
-            return visibilityDeadlines.size();
         } finally {
             lock.unlock();
         }
@@ -174,30 +186,103 @@ final class Partition {
         }
     }
 
+    int expiredCount() {
+        lock.lock();
+        try {
+            return expired;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    int visibilityDeadlineCount() {
+        lock.lock();
+        try {
+            return visibilityDeadlines.size();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    int ttlDeadlineCount() {
+        lock.lock();
+        try {
+            return ttlDeadlines.size();
+        } finally {
+            lock.unlock();
+        }
+    }
+
     private int drainLocked(int limit) {
         long now = clock.monotonicMillis();
         int drained = 0;
-        while (drained < limit && !visibilityDeadlines.isEmpty() && visibilityDeadlines.first().at() <= now) {
-            expireLease(visibilityDeadlines.pollFirst().id());
+        while (drained < limit) {
+            Deadline lease = firstDue(visibilityDeadlines, now);
+            Deadline ttl = firstDue(ttlDeadlines, now);
+            if (lease == null && ttl == null) {
+                break;
+            }
+            if (ttl == null || (lease != null && DEADLINE_ORDER.compare(lease, ttl) <= 0)) {
+                visibilityDeadlines.pollFirst();
+                expireLease(lease.id(), now);
+            } else {
+                ttlDeadlines.pollFirst();
+                expireReady(ttl.id());
+            }
             drained++;
         }
         return drained;
     }
 
-    /** Applies the D8d lease-expiry rows: dead-letter once deliveries are used up, else redeliver in place. */
-    private void expireLease(MessageId id) {
+    private static Deadline firstDue(TreeSet<Deadline> deadlines, long now) {
+        return deadlines.isEmpty() || deadlines.first().at() > now ? null : deadlines.first();
+    }
+
+    /**
+     * Applies the D8d lease-expiry rows in order: TTL passed → dropped as expired; deliveries used up →
+     * dead-lettered; otherwise → redelivered in its original position.
+     */
+    private void expireLease(MessageId id, long now) {
         inFlight.remove(id);
         Message message = messages.get(id);
-        if (message.deliveryCount() >= config.maxDeliveries()) {
+        if (now >= message.expiresAtMono()) {
+            messages.remove(id);
+            expired++;
+        } else if (message.deliveryCount() >= config.maxDeliveries()) {
             messages.remove(id);
             deadLetters.deadLetter(message, new DeadLetterInfo(
                     queueName, message.deliveryCount(), DeadLetterReason.MAX_DELIVERIES, clock.wallTime()));
         } else {
-            lanes.get(message.priority()).offerRetry(new Lane.Entry(message.seq(), id));
+            makeReady(message, true);
         }
     }
 
-    private static void validate(String payload, Priority priority) {
+    /** A ready message's TTL passed: tombstone its lane entry and drop it (D9b). */
+    private void expireReady(MessageId id) {
+        Message message = messages.remove(id);
+        lanes.get(message.priority()).markDead(ready.remove(id));
+        expired++;
+    }
+
+    private void makeReady(Message message, boolean redelivery) {
+        Lane.Entry entry = new Lane.Entry(message.seq(), message.id());
+        Lane lane = lanes.get(message.priority());
+        if (redelivery) {
+            lane.offerRetry(entry);
+        } else {
+            lane.offer(entry);
+        }
+        ready.put(message.id(), entry);
+        if (message.expiresAtMono() != Message.NO_EXPIRY) {
+            ttlDeadlines.add(ttlDeadline(message));
+        }
+    }
+
+    private static Deadline ttlDeadline(Message message) {
+        return new Deadline(message.expiresAtMono(), message.seq(), message.id());
+    }
+
+    private static void validate(String payload, Priority priority, Duration ttl) {
         if (payload == null) {
             throw new ValidationException("payload is required");
         }
@@ -208,6 +293,9 @@ final class Partition {
         if (payload.length() * 3L > MAX_PAYLOAD_BYTES
                 && payload.getBytes(StandardCharsets.UTF_8).length > MAX_PAYLOAD_BYTES) {
             throw new ValidationException("payload exceeds " + MAX_PAYLOAD_BYTES + " bytes (UTF-8)");
+        }
+        if (ttl != null && (ttl.compareTo(MIN_TTL) < 0 || ttl.compareTo(MAX_TTL) > 0)) {
+            throw new ValidationException("ttl must be between 1s and 14d, was " + ttl);
         }
     }
 }
