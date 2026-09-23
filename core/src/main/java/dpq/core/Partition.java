@@ -144,6 +144,7 @@ final class Partition {
         try {
             long now = clock.monotonicMillis();
             drainLocked(drainLimit, now);
+            expireDueHeads(now);
             Optional<Lane> lane = policy.select(lanes);
             if (lane.isEmpty()) {
                 counters.dequeueEmpty++;
@@ -230,13 +231,15 @@ final class Partition {
 
     /**
      * Reads a consistent snapshot of this partition (D12a). Like any operation, it first drains up to the drain
-     * limit, so expired messages don't count as ready or old.
+     * limit, then expires any due lane heads, so an expired message never counts as the oldest. Ready counts may
+     * still include expired messages deeper in a lane until a drain or the reaper reaches them.
      */
     QueueMetricsSnapshot snapshot() {
         lock.lock();
         try {
             long now = clock.monotonicMillis();
             drainLocked(drainLimit, now);
+            expireDueHeads(now);
             EnumMap<Priority, Long> readyCounts = new EnumMap<>(Priority.class);
             EnumMap<Priority, Double> oldestAge = new EnumMap<>(Priority.class);
             for (Priority p : Priority.values()) {
@@ -351,6 +354,24 @@ final class Partition {
         } else {
             makeReady(message, true);
             counters.redelivered++;
+        }
+    }
+
+    /**
+     * Expires every lane's head while its TTL has passed. A bounded drain may leave due TTLs behind (D6); this
+     * makes sure the next message served, or aged, is live. Each message expires at most once, so the work is
+     * the drain's work done early.
+     */
+    private void expireDueHeads(long now) {
+        for (Lane lane : lanes.values()) {
+            for (Optional<Lane.Entry> head = lane.peek(); head.isPresent(); head = lane.peek()) {
+                Message message = messages.get(head.get().id());
+                if (message.expiresAtMono() > now) {
+                    break;
+                }
+                ttlDeadlines.remove(ttlDeadline(message));
+                expireReady(message.id());
+            }
         }
     }
 

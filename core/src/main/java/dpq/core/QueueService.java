@@ -24,6 +24,12 @@ public final class QueueService implements AutoCloseable {
      */
     public record Options(int maxQueues, int drainLimit, Duration reaperInterval) {
 
+        public Options {
+            if (drainLimit < 1) {
+                throw new IllegalArgumentException("drainLimit must be at least 1, was " + drainLimit);
+            }
+        }
+
         public static Options defaults() {
             return new Options(1000, Partition.DEFAULT_DRAIN_LIMIT, Duration.ofMillis(100));
         }
@@ -154,11 +160,17 @@ public final class QueueService implements AutoCloseable {
                 .toList();
     }
 
-    /** Fully drains every partition; the reaper's task (D6). */
+    /**
+     * Fully drains every partition; the reaper's task (D6). It drains in chunks of the drain limit and releases
+     * the lock between them, so a mass expiry never holds a partition's lock for one long drain.
+     */
     void sweep() {
+        int limit = options.drainLimit();
         for (Queue queue : queues.values()) {
             for (Partition partition : queue.partitions()) {
-                partition.drainExpired(Integer.MAX_VALUE);
+                while (partition.drainExpired(limit) == limit) {
+                    // more may be due
+                }
             }
         }
     }

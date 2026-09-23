@@ -200,6 +200,23 @@ class QueueServiceTest {
         assertThat(service.partition("foo.dlq").readyCount(Priority.LOW)).isEqualTo(1);
     }
 
+    @Test
+    void aSweepDrainsEverythingEvenPastTheDrainLimit() {
+        service.close();
+        service = service(QueueService.Options.defaults().withoutReaper().withDrainLimit(2));
+        service.createQueue("foo", QueueConfig.of(null, null, null));
+        for (int i = 0; i < 5; i++) {
+            service.enqueue("foo", "m" + i, Priority.LOW, null);
+            service.dequeue("foo").orElseThrow();
+        }
+        clock.advance(QueueConfig.DEFAULT_VISIBILITY_TIMEOUT);
+
+        service.sweep(); // in chunks of the drain limit, releasing the lock between them
+
+        assertThat(service.partition("foo").inFlightCount()).isZero();
+        assertThat(service.partition("foo").readyCount(Priority.LOW)).isEqualTo(5);
+    }
+
     private QueueService service(QueueService.Options options) {
         return new QueueService(clock, new SequentialIdGenerator(), new SequentialReceiptGenerator(), options);
     }

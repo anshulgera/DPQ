@@ -71,6 +71,19 @@ class LaneTest {
     }
 
     @Test
+    void peekReturnsWhatPollWouldWithoutRemovingIt() {
+        offerAll(1);
+        lane.offerRetry(entry(5));
+        Lane.Entry dead = entry(0);
+        lane.offerRetry(dead);
+        lane.markDead(dead);
+
+        assertThat(lane.peek()).map(Lane.Entry::seq).contains(5L);
+        assertThat(lane.poll()).map(Lane.Entry::seq).contains(5L);
+        assertThat(lane.peek()).map(Lane.Entry::seq).contains(1L);
+    }
+
+    @Test
     void peekOldestDoesNotRemoveTheEntry() {
         offerAll(1);
 

@@ -157,6 +157,32 @@ class PartitionTtlTest {
     }
 
     @Test
+    void dequeueNeverDeliversAMessageWhoseTtlPassedButTheBoundedDrainHasNotReached() {
+        partition = partition(5, 1);
+        partition.enqueue("stale-1", Priority.HIGH, TTL);
+        partition.enqueue("stale-2", Priority.HIGH, TTL);
+        partition.enqueue("stale-3", Priority.HIGH, TTL);
+        partition.enqueue("live", Priority.LOW);
+        clock.advance(TTL); // three TTLs are due, but each operation drains only one
+
+        assertThat(partition.dequeue()).map(DeliveredMessage::payload).contains("live");
+        assertThat(partition.dequeue()).isEmpty();
+        assertThat(partition.expiredCount()).isEqualTo(3);
+    }
+
+    @Test
+    void oldestAgeSkipsExpiredHeadsTheBoundedDrainHasNotReached() {
+        partition = partition(5, 1);
+        partition.enqueue("stale-1", Priority.HIGH, TTL);
+        partition.enqueue("stale-2", Priority.HIGH, TTL);
+        clock.advance(Duration.ofSeconds(10));
+        partition.enqueue("fresh", Priority.HIGH);
+        clock.advance(TTL);
+
+        assertThat(partition.snapshot().oldestAgeSecondsByPriority()).containsEntry(Priority.HIGH, 60.0);
+    }
+
+    @Test
     void rejectsTtlOutsideOneSecondToFourteenDays() {
         assertThatThrownBy(() -> partition.enqueue("m", Priority.LOW, Duration.ofMillis(999)))
                 .isInstanceOf(ValidationException.class)

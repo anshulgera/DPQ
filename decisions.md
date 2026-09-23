@@ -137,7 +137,7 @@ The gap is **durability** (D3), not scale. A single hot queue needs partitions, 
   - The bound on K stops a mass expiry (a whole consumer fleet dying at once) from turning the next dequeue into a long critical section that breaks p95.
 - **Consequences:**
   - On an idle queue, metrics can lag by up to one reaper interval.
-  - The reaper briefly takes each partition's lock. After a mass expiry, it can hold the lock for one full drain.
+  - The reaper briefly takes each partition's lock. It drains in chunks of K and releases the lock between them, so even after a mass expiry it never holds a partition's lock for more than one chunk.
   - Under a mass expiry, some redeliveries appear up to one reaper interval late. This affects liveness only: an undrained message stays invisible, so it is never delivered twice.
 
 ## D7 — Priority policy: strict, behind a pluggable SelectionPolicy
@@ -494,3 +494,4 @@ These gaps came up when the execution session started. The author resolved them,
 - **D18h — Queue-cap rejection (refines D11b):** creating a user queue beyond the per-node cap throws `QueueLimitExceededException`, which the HTTP layer maps to **429** (a resource limit, like `maxDepth`). Repeating the create of an existing queue still returns 200 at the cap.
 - **D18i — Expiry is judged at the deadline, not at drain time (refines D6, D8d):** the D8d lease-expiry rows are evaluated at the lease deadline, so the outcome doesn't depend on when a drain or the reaper happens to run. A lease that ended before the TTL is redelivered or dead-lettered even if the drain runs after the TTL. A dead-lettered message's `deadLetteredAt` (and its DLQ `enqueuedAt` and age) is the lease deadline. Found by the model-based tests (PR 8).
 - **D18j — One clock reading per operation (refines D6):** each partition operation reads the monotonic clock once and uses that instant throughout. Displayed times (`enqueuedAt`, `visibleUntil`, `deadLetteredAt`) come from `Clock.wallTimeAt(monotonicInstant)` rather than a second wall-clock read, so `visibleUntil` is exactly when the lease ends. Found by the conservation stress test (PR 9).
+- **D18k — Due lane heads are expired before serving (refines D6):** a bounded drain can leave due TTLs behind, so `dequeue` and the metrics snapshot also expire every lane head whose TTL has passed before reading it. An expired message is therefore never delivered and never counted as the oldest, whatever the drain limit. Ready counts may still include expired messages deeper in a lane until a drain or the reaper reaches them. Found in review: the model-based tests ran with an unlimited drain, so they never exercised the bounded path.
