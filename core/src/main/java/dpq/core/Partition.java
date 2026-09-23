@@ -6,7 +6,10 @@ import java.time.Instant;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeSet;
@@ -57,7 +60,8 @@ final class Partition {
 
     // Guarded by lock.
     private final EnumMap<Priority, Lane> lanes = new EnumMap<>(Priority.class);
-    private final Map<MessageId, Message> messages = new HashMap<>(); // every live message, ready or in flight
+    // Every live message, ready or in flight, in arrival order (a replaced value keeps its place).
+    private final Map<MessageId, Message> messages = new LinkedHashMap<>();
     private final Map<MessageId, Lane.Entry> ready = new HashMap<>(); // lane entry of each ready message
     private final Map<MessageId, Lease> inFlight = new HashMap<>();
     // Only live deadlines (D4): a lease's entry is removed on ack or expiry; a TTL entry exists only while the
@@ -248,6 +252,26 @@ final class Partition {
                     byPriority(counters.delivered), counters.dequeueEmpty, counters.acked, counters.redelivered,
                     counters.deadLettered, byPriority(counters.expired), counters.enqueueRejected,
                     counters.enqueueRate.perSecond(now), counters.ackRate.perSecond(now));
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** Up to {@code limit} live messages in arrival order, without leasing or changing any (D18b). O(limit). */
+    List<MessageView> list(int limit) {
+        lock.lock();
+        try {
+            drainLocked(drainLimit, clock.monotonicMillis());
+            List<MessageView> views = new ArrayList<>(Math.min(limit, messages.size()));
+            for (Message m : messages.values()) {
+                if (views.size() == limit) {
+                    break;
+                }
+                MessageState state = inFlight.containsKey(m.id()) ? MessageState.IN_FLIGHT : MessageState.READY;
+                views.add(new MessageView(m.id(), m.payload(), m.priority(), state, m.enqueuedAt(),
+                        m.deliveryCount(), m.deadLetter()));
+            }
+            return views;
         } finally {
             lock.unlock();
         }
