@@ -43,6 +43,9 @@ class QueueServiceTest {
         service.createQueue("foo", QueueConfig.of(120L, 3, 50));
 
         QueueDescription dlq = service.getQueue("foo.dlq");
+        assertThat(service.hasQueue("foo")).isTrue();
+        assertThat(service.hasQueue("foo.dlq")).isTrue();
+        assertThat(service.hasQueue("bar")).isFalse();
 
         assertThat(dlq.deadLetterQueue()).isTrue();
         assertThat(dlq.config()).isEqualTo(QueueConfig.of(null, null, null)); // fixed, not the source's (D18b)

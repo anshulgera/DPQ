@@ -102,6 +102,10 @@ public final class QueueService implements AutoCloseable {
         return require(name).description();
     }
 
+    public boolean hasQueue(String name) {
+        return name != null && queues.containsKey(name);
+    }
+
     public Set<String> queueNames() {
         return Set.copyOf(queues.keySet());
     }
