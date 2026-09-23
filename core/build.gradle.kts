@@ -2,6 +2,7 @@
 plugins {
     id("dpq.java-conventions")
     `java-library`
+    `java-test-fixtures`
 }
 
 dependencies {
