@@ -77,7 +77,7 @@ gh pr edit <N+1 number> --base main
 CI (`.github/workflows/ci.yml`) triggers on `pull_request` **without** a `branches: [main]` filter, so stacked PRs are tested too.
 
 ### TDD (D17)
-- **Applies to PRs 2–7 and 10–11.** For each test listed under the PR:
+- **Applies to PRs 2–7 (incl. 5a/5b) and 10–11.** For each test listed under the PR:
   - **Red:** write the test and run it. It must fail *for the expected reason* (an assertion failure, not a compile error in unrelated code).
   - **Green:** write the minimum code to make it pass.
   - **Refactor:** tidy up with all tests green.
@@ -97,7 +97,7 @@ CI (`.github/workflows/ci.yml`) triggers on `pull_request` **without** a `branch
 | Method | Path | Body | Responses |
 |---|---|---|---|
 | PUT | `/queues/{name}` | `{visibilityTimeoutSeconds?, maxDeliveries?, maxDepth?}` | 201 created / 200 identical config / 409 different config / 400 |
-| GET | `/queues/{name}` | – | 200 config / 404. For `{name}.dlq`: 200 read-only list of DLQ messages (D18b; shape settled before PR 10) |
+| GET | `/queues/{name}` | – | 200 config / 404. For `{name}.dlq`: 200 read-only `{messages: [{messageId, payload, priority, state, enqueuedAt, deadLetter}]}`, ready + in-flight, `?limit=` (default/max 100) (D18b) |
 | POST | `/queues/{name}/messages` | `{payload, priority, ttlSeconds?}` | 201 `{messageId}` / 400 (incl. enqueue into a `.dlq`) / 404 / 429 |
 | POST | `/queues/{name}/dequeue` | – | 200 `{messageId, receiptHandle, payload, priority, deliveryCount, enqueuedAt, visibleUntil}` plus dead-letter metadata when dequeued from a DLQ (D18c) / 204 / 404 |
 | POST | `/queues/{name}/messages/{id}/ack` | `{receiptHandle}` | 204 / 404 gone or unknown / 409 stale receipt or lease expired (see D8d) |
@@ -200,29 +200,36 @@ Each PR lists its scope and then its **tests**, which are also its acceptance cr
   - `deliveryCount` is 1 on the first dequeue.
   - `deliverySeq` goes up strictly across deliveries.
 
-### PR 5 — Timeouts & TTL (`pr/05-timeouts`) · D6, D8b, D9b, D9c
-- Visibility-deadline and TTL-deadline sets: `TreeSet<Deadline(at, seq)>`, removed eagerly (the visibility entry on ack; the TTL entry on dequeue, re-added on redelivery).
+### PR 5a — Visibility timeout & redelivery (`pr/05a-visibility`) · D6, D8b, D8d · (split per D18g)
+- A visibility-deadline set: `TreeSet<Deadline(at, seq)>`, with the entry removed on ack.
 - `drainExpired(now, limit)` runs at the start of every operation with `limit = K` (default 256); the reaper (PR 6) calls it with no limit.
-- Lease-expiry outcome follows the **D8d table**, in order: TTL passed → drop as expired; else `deliveryCount >= maxDeliveries` → `DeadLetterSink`; else → the lane's retry heap (original seq).
-- An expired TTL on a ready message drops it (tombstone + counter).
+- Lease-expiry outcome follows the **D8d table**: `deliveryCount >= maxDeliveries` → `DeadLetterSink`; else → the lane's retry heap (original seq). (The TTL row is added in 5b.)
 - `ack` rejects with `StaleReceipt` when `now >= lease.deadline`, whether or not the drain has processed that lease yet.
-- **Tests (all with `FakeClock`; one per D8d row plus the following):**
+- **Tests (all with `FakeClock`):**
   - At deadline − 1ms the message is still invisible; at the deadline it becomes visible again.
   - A redelivered message comes before a newer message of the same priority.
   - `deliveryCount` increments on each redelivery.
   - An old receipt after redelivery throws `StaleReceipt`.
   - With `maxDeliveries=2`: the 1st expiry → redelivery; the 2nd expiry → DLQ sink called with reason `MAX_DELIVERIES`; the message is not visible in the source.
   - With `maxDeliveries=1`: the first expiry sends the message straight to the DLQ.
+  - Ack at exactly the lease deadline, before any drain, → `StaleReceipt`.
+  - Ack of a message that was dead-lettered → `MessageNotFound`.
+  - Acking before the deadline, then advancing past it, causes no phantom redelivery.
+  - With K+1 leases expiring at the same instant, one op drains exactly K; a full drain handles the rest.
+
+### PR 5b — TTL (`pr/05b-ttl`) · D6, D9b, D9c, D8d
+- A TTL-deadline set: `TreeSet<Deadline(at, seq)>`, with the entry removed on dequeue and re-added on redelivery.
+- The drain also handles TTL deadlines, within the same limit K.
+- An expired TTL on a ready message drops it (tombstone + counter).
+- Lease expiry checks TTL first: TTL passed → drop as expired (TTL beats DLQ).
+- **Tests (all with `FakeClock`; completes the D8d rows):**
   - A ready message past its TTL is never dequeued and the expired counter increments.
   - A TTL that passes while in flight still allows the ack to succeed.
   - A TTL that passes while in flight, followed by lease expiry, drops the message as expired (no redelivery, no DLQ).
   - A lease expiring with `deliveryCount >= maxDeliveries` **and** the TTL passed → dropped as expired, not dead-lettered.
-  - Ack at exactly the lease deadline, before any drain, → `StaleReceipt`.
-  - Ack of a message that was dead-lettered or expired → `MessageNotFound`.
-  - Acking before the deadline, then advancing past it, causes no phantom redelivery.
+  - Ack of a message that expired → `MessageNotFound`.
   - An expired entry deep in the deque (not at the head) is still removed from the counts.
   - After enqueue → dequeue → ack of many TTL'd messages, both deadline sets are empty (no leak).
-  - With K+1 leases expiring at the same instant, one op drains exactly K; a full drain handles the rest.
 
 ### PR 6 — QueueService, DLQ & Reaper (`pr/06-service`) · D5, D9a, D11c, D6
 - `QueueService`: a `ConcurrentHashMap` registry.
