@@ -13,4 +13,10 @@ public interface Clock {
 
     /** Current wall-clock time, for display. */
     Instant wallTime();
+
+    /**
+     * The wall-clock time of an instant on the monotonic scale, for displaying times the engine computed from
+     * {@link #monotonicMillis()} (enqueue time, lease end, dead-letter time) without a second, later reading.
+     */
+    Instant wallTimeAt(long monotonicMillis);
 }
