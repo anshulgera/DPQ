@@ -4,12 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dpq.core.FakeClock;
-import dpq.core.Priority;
-import dpq.core.QueueConfig;
 import dpq.core.QueueService;
-import dpq.core.SequentialIdGenerator;
-import dpq.core.SequentialReceiptGenerator;
+import dpq.core.id.SequentialIdGenerator;
+import dpq.core.id.SequentialReceiptGenerator;
+import dpq.core.model.Priority;
+import dpq.core.model.QueueConfig;
+import dpq.core.time.FakeClock;
 import io.javalin.testtools.JavalinTest;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -206,7 +206,7 @@ class MetricsEndpointTest {
         service.enqueue("orders", "c", Priority.LOW, null);
         try {
             service.enqueue("orders", "d", Priority.LOW, null);
-        } catch (dpq.core.QueueFullException expected) {
+        } catch (dpq.core.error.QueueFullException expected) {
             // counted as rejected
         }
         var delivered = service.dequeue("orders").orElseThrow();

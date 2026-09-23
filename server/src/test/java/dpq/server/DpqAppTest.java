@@ -4,10 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dpq.core.FakeClock;
 import dpq.core.QueueService;
-import dpq.core.SequentialIdGenerator;
-import dpq.core.SequentialReceiptGenerator;
+import dpq.core.id.SequentialIdGenerator;
+import dpq.core.id.SequentialReceiptGenerator;
+import dpq.core.time.FakeClock;
 import io.javalin.testtools.JavalinTest;
 import java.net.URI;
 import java.net.http.HttpClient;
