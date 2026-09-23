@@ -73,6 +73,7 @@ class MetricsEndpointTest {
     void theExpositionIsWellFormedAndHasEveryMetricWithItsTypeAndLabels() {
         run(() -> {
             scriptedScenario();
+            send("POST", "/queues/orders/dequeue", ""); // one timed request, so the histogram has a series
             HttpResponse<String> response = send("GET", "/metrics", "");
 
             assertThat(response.statusCode()).isEqualTo(200);
@@ -151,6 +152,7 @@ class MetricsEndpointTest {
             send("POST", "/queues/orders/messages/" + d.get("messageId").asText() + "/ack",
                     "{\"receiptHandle\": \"" + d.get("receiptHandle").asText() + "\"}");
             send("POST", "/queues/nope/messages", "{\"payload\": \"x\", \"priority\": \"LOW\"}"); // unknown queue
+            send("POST", "/queues/nope/messages", "{not json"); // fails before the queue lookup
 
             String body = send("GET", "/metrics", "").body();
 

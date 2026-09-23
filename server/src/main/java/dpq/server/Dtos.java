@@ -6,8 +6,10 @@ import dpq.core.MessageState;
 import dpq.core.MessageView;
 import dpq.core.Priority;
 import dpq.core.QueueDescription;
+import dpq.core.QueueMetricsSnapshot;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 /** JSON request and response bodies (plan.md §5). Null fields are omitted from responses. */
 final class Dtos {
@@ -56,6 +58,20 @@ final class Dtos {
 
     /** GET /queues/{name}.dlq (D18b). */
     record MessageListResponse(List<MessageJson> messages) {}
+
+    /** GET /queues/{name}/metrics: the spec's "Get Metrics", from the same snapshot as /metrics (D12a). */
+    record MetricsResponse(String queue, Map<Priority, Long> ready, long totalReady, long inFlight,
+            double oldestMessageAgeSeconds, Map<Priority, Double> oldestAgeSecondsByPriority,
+            Map<Priority, Long> enqueued, Map<Priority, Long> delivered, long dequeueEmpty, long acked,
+            long redelivered, long deadLettered, Map<Priority, Long> expired, long enqueueRejected,
+            double enqueueRatePerSec, double ackRatePerSec) {
+        static MetricsResponse of(QueueMetricsSnapshot m) {
+            return new MetricsResponse(m.queue(), m.ready(), m.totalReady(), m.inFlight(), m.oldestAgeSeconds(),
+                    m.oldestAgeSecondsByPriority(), m.enqueued(), m.delivered(), m.dequeueEmpty(), m.acked(),
+                    m.redelivered(), m.deadLettered(), m.expired(), m.enqueueRejected(), m.enqueueRatePerSec(),
+                    m.ackRatePerSec());
+        }
+    }
 
     record ErrorResponse(String error, String message) {}
 
