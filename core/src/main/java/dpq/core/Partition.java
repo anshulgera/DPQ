@@ -96,8 +96,8 @@ final class Partition {
         validate(payload, priority, ttl);
         lock.lock();
         try {
-            drainLocked(drainLimit);
             long now = clock.monotonicMillis();
+            drainLocked(drainLimit, now);
             if (messages.size() >= maxDepth) {
                 counters.enqueueRejected++;
                 throw new QueueFullException(queueName, maxDepth);
@@ -105,7 +105,7 @@ final class Partition {
             MessageId id = ids.next(index);
             long expiresAt = ttl == null ? Message.NO_EXPIRY : now + ttl.toMillis();
             Message message =
-                    new Message(id, payload, priority, nextSeq++, now, clock.wallTime(), expiresAt, 0, null);
+                    new Message(id, payload, priority, nextSeq++, now, clock.wallTimeAt(now), expiresAt, 0, null);
             messages.put(id, message);
             makeReady(message, false);
             counters.enqueued(priority, now);
@@ -138,7 +138,8 @@ final class Partition {
     Optional<DeliveredMessage> dequeue() {
         lock.lock();
         try {
-            drainLocked(drainLimit);
+            long now = clock.monotonicMillis();
+            drainLocked(drainLimit, now);
             Optional<Lane> lane = policy.select(lanes);
             if (lane.isEmpty()) {
                 counters.dequeueEmpty++;
@@ -154,12 +155,12 @@ final class Partition {
 
             ReceiptHandle receipt = receipts.next();
             long timeoutMillis = config.visibilityTimeout().toMillis();
-            Deadline deadline = new Deadline(clock.monotonicMillis() + timeoutMillis, message.seq(), message.id());
+            Deadline deadline = new Deadline(now + timeoutMillis, message.seq(), message.id());
             visibilityDeadlines.add(deadline);
             inFlight.put(message.id(), new Lease(receipt, deadline));
             counters.delivered[message.priority().ordinal()]++;
             return Optional.of(new DeliveredMessage(message.id(), receipt, message.payload(), message.priority(),
-                    message.deliveryCount(), message.enqueuedAt(), clock.wallTime().plusMillis(timeoutMillis),
+                    message.deliveryCount(), message.enqueuedAt(), clock.wallTimeAt(deadline.at()),
                     nextDeliverySeq++, message.deadLetter()));
         } finally {
             lock.unlock();
@@ -175,20 +176,21 @@ final class Partition {
     void ack(MessageId id, ReceiptHandle receipt) {
         lock.lock();
         try {
-            drainLocked(drainLimit);
+            long now = clock.monotonicMillis();
+            drainLocked(drainLimit, now);
             if (!messages.containsKey(id)) {
                 throw new MessageNotFoundException(id);
             }
             Lease lease = inFlight.get(id);
             if (lease == null
                     || !lease.receipt().equals(receipt)
-                    || clock.monotonicMillis() >= lease.deadline().at()) {
+                    || now >= lease.deadline().at()) {
                 throw new StaleReceiptException(id);
             }
             inFlight.remove(id);
             visibilityDeadlines.remove(lease.deadline());
             messages.remove(id);
-            counters.acked(clock.monotonicMillis());
+            counters.acked(now);
         } finally {
             lock.unlock();
         }
@@ -198,7 +200,7 @@ final class Partition {
     int drainExpired(int limit) {
         lock.lock();
         try {
-            return drainLocked(limit);
+            return drainLocked(limit, clock.monotonicMillis());
         } finally {
             lock.unlock();
         }
@@ -229,8 +231,8 @@ final class Partition {
     QueueMetricsSnapshot snapshot() {
         lock.lock();
         try {
-            drainLocked(drainLimit);
             long now = clock.monotonicMillis();
+            drainLocked(drainLimit, now);
             EnumMap<Priority, Long> readyCounts = new EnumMap<>(Priority.class);
             EnumMap<Priority, Double> oldestAge = new EnumMap<>(Priority.class);
             for (Priority p : Priority.values()) {
@@ -278,8 +280,8 @@ final class Partition {
         }
     }
 
-    private int drainLocked(int limit) {
-        long now = clock.monotonicMillis();
+    /** Drains as of {@code now}: the single clock reading the calling operation uses throughout. */
+    private int drainLocked(int limit, long now) {
         int drained = 0;
         while (drained < limit) {
             Deadline lease = firstDue(visibilityDeadlines, now);
@@ -319,7 +321,7 @@ final class Partition {
         } else if (message.deliveryCount() >= maxDeliveries) {
             messages.remove(id);
             counters.deadLettered++;
-            Instant deadLetteredAt = clock.wallTime().minusMillis(now - at);
+            Instant deadLetteredAt = clock.wallTimeAt(at);
             deadLetters.deadLetter(message, new DeadLetterInfo(
                     queueName, message.deliveryCount(), DeadLetterReason.MAX_DELIVERIES, deadLetteredAt), at);
         } else {
