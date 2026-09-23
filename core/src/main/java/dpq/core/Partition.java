@@ -14,6 +14,7 @@ import java.util.concurrent.locks.ReentrantLock;
 final class Partition {
 
     static final int MAX_PAYLOAD_BYTES = 256 * 1024;
+    static final int DEFAULT_DRAIN_LIMIT = 256;
 
     private record Lease(ReceiptHandle receipt, long deadlineMono) {}
 
@@ -35,7 +36,7 @@ final class Partition {
     private long nextDeliverySeq;
 
     Partition(String queueName, int index, QueueConfig config, Clock clock, IdGenerator ids,
-            ReceiptGenerator receipts, SelectionPolicy policy) {
+            ReceiptGenerator receipts, SelectionPolicy policy, DeadLetterSink deadLetters, int drainLimit) {
         this.queueName = queueName;
         this.index = index;
         this.config = config;
@@ -107,6 +108,14 @@ final class Partition {
         } finally {
             lock.unlock();
         }
+    }
+
+    int drainExpired(int limit) {
+        return 0;
+    }
+
+    int visibilityDeadlineCount() {
+        return 0;
     }
 
     int readyCount(Priority priority) {

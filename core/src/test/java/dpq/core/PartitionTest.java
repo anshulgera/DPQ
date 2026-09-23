@@ -192,9 +192,8 @@ class PartitionTest {
     }
 
     private Partition partition(QueueConfig config) {
-        return new Partition(
-                "orders", 0, config, clock, new SequentialIdGenerator(), new SequentialReceiptGenerator(),
-                new StrictPriorityPolicy());
+        return new Partition("orders", 0, config, clock, new SequentialIdGenerator(), new SequentialReceiptGenerator(),
+                new StrictPriorityPolicy(), (message, info) -> {}, Partition.DEFAULT_DRAIN_LIMIT);
     }
 
     private List<String> drainPayloads() {
