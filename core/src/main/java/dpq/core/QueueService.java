@@ -1,6 +1,7 @@
 package dpq.core;
 
 import java.time.Duration;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -121,6 +122,19 @@ public final class QueueService implements AutoCloseable {
             throw new MessageNotFoundException(id);
         }
         q.partitions().get(id.partition()).ack(id, receipt);
+    }
+
+    /** One queue's metrics; with one partition per queue (D5b), that partition's snapshot. */
+    public QueueMetricsSnapshot metrics(String queue) {
+        return require(queue).partitions().get(0).snapshot();
+    }
+
+    /** Metrics for every queue, DLQs included, sorted by name. */
+    public List<QueueMetricsSnapshot> metricsAll() {
+        return queues.values().stream()
+                .map(q -> q.partitions().get(0).snapshot())
+                .sorted(Comparator.comparing(QueueMetricsSnapshot::queue))
+                .toList();
     }
 
     /** Fully drains every partition; the reaper's task (D6). */

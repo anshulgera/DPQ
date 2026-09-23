@@ -2,6 +2,7 @@ package dpq.core;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashMap;
@@ -64,7 +65,7 @@ final class Partition {
     private final TreeSet<Deadline> ttlDeadlines = new TreeSet<>(DEADLINE_ORDER);
     private long nextSeq;
     private long nextDeliverySeq;
-    private int expired;
+    private final QueueCounters counters = new QueueCounters();
 
     Partition(String queueName, int index, QueueConfig config, boolean deadLetterQueue, Clock clock, IdGenerator ids,
             ReceiptGenerator receipts, SelectionPolicy policy, DeadLetterSink deadLetters, int drainLimit) {
@@ -95,16 +96,18 @@ final class Partition {
         lock.lock();
         try {
             drainLocked(drainLimit);
+            long now = clock.monotonicMillis();
             if (messages.size() >= maxDepth) {
+                counters.enqueueRejected++;
                 throw new QueueFullException(queueName, maxDepth);
             }
             MessageId id = ids.next(index);
-            long now = clock.monotonicMillis();
             long expiresAt = ttl == null ? Message.NO_EXPIRY : now + ttl.toMillis();
             Message message =
                     new Message(id, payload, priority, nextSeq++, now, clock.wallTime(), expiresAt, 0, null);
             messages.put(id, message);
             makeReady(message, false);
+            counters.enqueued(priority, now);
             return id;
         } finally {
             lock.unlock();
@@ -121,10 +124,12 @@ final class Partition {
         }
         lock.lock();
         try {
-            Message message = new Message(source.id(), source.payload(), source.priority(), nextSeq++,
-                    clock.monotonicMillis(), info.deadLetteredAt(), Message.NO_EXPIRY, 0, info);
+            long now = clock.monotonicMillis();
+            Message message = new Message(source.id(), source.payload(), source.priority(), nextSeq++, now,
+                    info.deadLetteredAt(), Message.NO_EXPIRY, 0, info);
             messages.put(message.id(), message);
             makeReady(message, false);
+            counters.enqueued(message.priority(), now);
         } finally {
             lock.unlock();
         }
@@ -136,6 +141,7 @@ final class Partition {
             drainLocked(drainLimit);
             Optional<Lane> lane = policy.select(lanes);
             if (lane.isEmpty()) {
+                counters.dequeueEmpty++;
                 return Optional.empty();
             }
             Lane.Entry entry = lane.get().poll().orElseThrow();
@@ -151,6 +157,7 @@ final class Partition {
             Deadline deadline = new Deadline(clock.monotonicMillis() + timeoutMillis, message.seq(), message.id());
             visibilityDeadlines.add(deadline);
             inFlight.put(message.id(), new Lease(receipt, deadline));
+            counters.delivered[message.priority().ordinal()]++;
             return Optional.of(new DeliveredMessage(message.id(), receipt, message.payload(), message.priority(),
                     message.deliveryCount(), message.enqueuedAt(), clock.wallTime().plusMillis(timeoutMillis),
                     nextDeliverySeq++, message.deadLetter()));
@@ -181,6 +188,7 @@ final class Partition {
             inFlight.remove(id);
             visibilityDeadlines.remove(lease.deadline());
             messages.remove(id);
+            counters.acked(clock.monotonicMillis());
         } finally {
             lock.unlock();
         }
@@ -214,10 +222,39 @@ final class Partition {
         }
     }
 
-    int expiredCount() {
+    /**
+     * Reads a consistent snapshot of this partition (D12a). Like any operation, it first drains up to the drain
+     * limit, so expired messages don't count as ready or old.
+     */
+    QueueMetricsSnapshot snapshot() {
         lock.lock();
         try {
-            return expired;
+            drainLocked(drainLimit);
+            long now = clock.monotonicMillis();
+            EnumMap<Priority, Long> readyCounts = new EnumMap<>(Priority.class);
+            EnumMap<Priority, Double> oldestAge = new EnumMap<>(Priority.class);
+            for (Priority p : Priority.values()) {
+                Lane lane = lanes.get(p);
+                readyCounts.put(p, (long) lane.size());
+                // O(1): the lane's oldest live entry; a redelivered message keeps its original enqueue time.
+                oldestAge.put(p, lane.peekOldest()
+                        .map(e -> (now - messages.get(e.id()).enqueuedAtMono()) / 1000.0)
+                        .orElse(0.0));
+            }
+            return new QueueMetricsSnapshot(queueName, Collections.unmodifiableMap(readyCounts), inFlight.size(),
+                    Collections.unmodifiableMap(oldestAge), byPriority(counters.enqueued),
+                    byPriority(counters.delivered), counters.dequeueEmpty, counters.acked, counters.redelivered,
+                    counters.deadLettered, byPriority(counters.expired), counters.enqueueRejected,
+                    counters.enqueueRate.perSecond(now), counters.ackRate.perSecond(now));
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    long expiredCount() {
+        lock.lock();
+        try {
+            return counters.totalExpired();
         } finally {
             lock.unlock();
         }
@@ -275,13 +312,15 @@ final class Partition {
         Message message = messages.get(id);
         if (now >= message.expiresAtMono()) {
             messages.remove(id);
-            expired++;
+            counters.expired[message.priority().ordinal()]++;
         } else if (message.deliveryCount() >= maxDeliveries) {
             messages.remove(id);
+            counters.deadLettered++;
             deadLetters.deadLetter(message, new DeadLetterInfo(
                     queueName, message.deliveryCount(), DeadLetterReason.MAX_DELIVERIES, clock.wallTime()));
         } else {
             makeReady(message, true);
+            counters.redelivered++;
         }
     }
 
@@ -289,7 +328,7 @@ final class Partition {
     private void expireReady(MessageId id) {
         Message message = messages.remove(id);
         lanes.get(message.priority()).markDead(ready.remove(id));
-        expired++;
+        counters.expired[message.priority().ordinal()]++;
     }
 
     private void makeReady(Message message, boolean redelivery) {
@@ -304,6 +343,14 @@ final class Partition {
         if (message.expiresAtMono() != Message.NO_EXPIRY) {
             ttlDeadlines.add(ttlDeadline(message));
         }
+    }
+
+    private static Map<Priority, Long> byPriority(long[] counts) {
+        EnumMap<Priority, Long> map = new EnumMap<>(Priority.class);
+        for (Priority p : Priority.values()) {
+            map.put(p, counts[p.ordinal()]);
+        }
+        return Collections.unmodifiableMap(map);
     }
 
     private static Deadline ttlDeadline(Message message) {
