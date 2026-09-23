@@ -60,7 +60,7 @@ class PartitionTtlTest {
 
     @Test
     void expiryFreesDepth() {
-        partition = new Partition("orders", 0, QueueConfig.of(null, null, 1), clock, new SequentialIdGenerator(),
+        partition = new Partition("orders", 0, QueueConfig.of(null, null, 1), false, clock, new SequentialIdGenerator(),
                 new SequentialReceiptGenerator(), new StrictPriorityPolicy(), (m, info) -> deadLettered.add(m),
                 Partition.DEFAULT_DRAIN_LIMIT);
         partition.enqueue("a", Priority.LOW, TTL);
@@ -168,7 +168,7 @@ class PartitionTtlTest {
     }
 
     private Partition partition(int maxDeliveries, int drainLimit) {
-        return new Partition("orders", 0, QueueConfig.of(VISIBILITY.toSeconds(), maxDeliveries, null), clock,
+        return new Partition("orders", 0, QueueConfig.of(VISIBILITY.toSeconds(), maxDeliveries, null), false, clock,
                 new SequentialIdGenerator(), new SequentialReceiptGenerator(), new StrictPriorityPolicy(),
                 (message, info) -> deadLettered.add(message), drainLimit);
     }

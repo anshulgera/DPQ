@@ -491,3 +491,4 @@ These gaps came up when the execution session started. The author resolved them,
   - The 1,000-user-queue cap is enforced with an atomic reservation, so concurrent creates of different queues can't go over it. DLQs don't count toward the cap.
   - Awaitility is a test dependency, used only for the real-scheduler reaper test (PR 6).
 - **D18g — PR 5 split (refines D16):** PR 5 is split into **5a** (visibility timeout, redelivery, the DLQ sink, the drain limit) and **5b** (TTL) to stay near the ~400-line PR budget.
+- **D18h — Queue-cap rejection (refines D11b):** creating a user queue beyond the per-node cap throws `QueueLimitExceededException`, which the HTTP layer maps to **429** (a resource limit, like `maxDepth`). Repeating the create of an existing queue still returns 200 at the cap.

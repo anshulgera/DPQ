@@ -120,7 +120,7 @@ class PartitionVisibilityTest {
 
     @Test
     void deadLetteringFreesDepth() {
-        partition = new Partition("orders", 0, QueueConfig.of(30L, 1, 1), clock, new SequentialIdGenerator(),
+        partition = new Partition("orders", 0, QueueConfig.of(30L, 1, 1), false, clock, new SequentialIdGenerator(),
                 new SequentialReceiptGenerator(), new StrictPriorityPolicy(),
                 (m, info) -> sink.add(new DeadLettered(m, info)), Partition.DEFAULT_DRAIN_LIMIT);
         partition.enqueue("a", Priority.LOW);
@@ -197,7 +197,7 @@ class PartitionVisibilityTest {
     }
 
     private Partition partition(int maxDeliveries, int drainLimit) {
-        return new Partition("orders", 0, QueueConfig.of(VISIBILITY.toSeconds(), maxDeliveries, null), clock,
+        return new Partition("orders", 0, QueueConfig.of(VISIBILITY.toSeconds(), maxDeliveries, null), false, clock,
                 new SequentialIdGenerator(), new SequentialReceiptGenerator(), new StrictPriorityPolicy(),
                 (message, info) -> sink.add(new DeadLettered(message, info)), drainLimit);
     }
