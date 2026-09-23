@@ -19,6 +19,9 @@ import java.util.concurrent.locks.ReentrantLock;
  *
  * <p>Lock order: a source partition calls its {@link DeadLetterSink} while holding its own lock, and the sink
  * takes the DLQ partition's lock. A DLQ never has a DLQ of its own, so the order is acyclic (D9a).
+ *
+ * <p>A dead-letter partition ({@code deadLetterQueue}, D18b) has no depth or delivery limit, so it never drops
+ * or forwards a message, and only {@link #acceptDeadLetter} adds to it.
  */
 final class Partition {
 
@@ -38,6 +41,9 @@ final class Partition {
     private final String queueName;
     private final int index;
     private final QueueConfig config;
+    private final boolean deadLetterQueue;
+    private final int maxDepth;
+    private final int maxDeliveries;
     private final Clock clock;
     private final IdGenerator ids;
     private final ReceiptGenerator receipts;
@@ -60,11 +66,14 @@ final class Partition {
     private long nextDeliverySeq;
     private int expired;
 
-    Partition(String queueName, int index, QueueConfig config, Clock clock, IdGenerator ids,
+    Partition(String queueName, int index, QueueConfig config, boolean deadLetterQueue, Clock clock, IdGenerator ids,
             ReceiptGenerator receipts, SelectionPolicy policy, DeadLetterSink deadLetters, int drainLimit) {
         this.queueName = queueName;
         this.index = index;
         this.config = config;
+        this.deadLetterQueue = deadLetterQueue;
+        this.maxDepth = deadLetterQueue ? Integer.MAX_VALUE : config.maxDepth();
+        this.maxDeliveries = deadLetterQueue ? Integer.MAX_VALUE : config.maxDeliveries();
         this.clock = clock;
         this.ids = ids;
         this.receipts = receipts;
@@ -86,8 +95,8 @@ final class Partition {
         lock.lock();
         try {
             drainLocked(drainLimit);
-            if (messages.size() >= config.maxDepth()) {
-                throw new QueueFullException(queueName, config.maxDepth());
+            if (messages.size() >= maxDepth) {
+                throw new QueueFullException(queueName, maxDepth);
             }
             MessageId id = ids.next(index);
             long now = clock.monotonicMillis();
@@ -97,6 +106,25 @@ final class Partition {
             messages.put(id, message);
             makeReady(message, false);
             return id;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * Adds a message dead-lettered by the source queue (D9a, D18c): same ID, payload and priority; no TTL; a
+     * fresh delivery count; {@code enqueuedAt} is the dead-letter time. Called under the source partition's lock.
+     */
+    void acceptDeadLetter(Message source, DeadLetterInfo info) {
+        if (!deadLetterQueue) {
+            throw new IllegalStateException(queueName + " is not a dead-letter queue");
+        }
+        lock.lock();
+        try {
+            Message message = new Message(source.id(), source.payload(), source.priority(), nextSeq++,
+                    clock.monotonicMillis(), info.deadLetteredAt(), Message.NO_EXPIRY, 0, info);
+            messages.put(message.id(), message);
+            makeReady(message, false);
         } finally {
             lock.unlock();
         }
@@ -248,7 +276,7 @@ final class Partition {
         if (now >= message.expiresAtMono()) {
             messages.remove(id);
             expired++;
-        } else if (message.deliveryCount() >= config.maxDeliveries()) {
+        } else if (message.deliveryCount() >= maxDeliveries) {
             messages.remove(id);
             deadLetters.deadLetter(message, new DeadLetterInfo(
                     queueName, message.deliveryCount(), DeadLetterReason.MAX_DELIVERIES, clock.wallTime()));
