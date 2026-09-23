@@ -128,6 +128,15 @@ public final class QueueService implements AutoCloseable {
         q.partitions().get(id.partition()).ack(id, receipt);
     }
 
+    /** Up to {@code limit} live messages of a queue in arrival order, read-only (D18b). */
+    public List<MessageView> listMessages(String queue, int limit) {
+        Queue q = require(queue);
+        if (limit < 1) {
+            throw new ValidationException("limit must be at least 1, was " + limit);
+        }
+        return q.partitions().get(0).list(limit);
+    }
+
     /** One queue's metrics; with one partition per queue (D5b), that partition's snapshot. */
     public QueueMetricsSnapshot metrics(String queue) {
         return require(queue).partitions().get(0).snapshot();

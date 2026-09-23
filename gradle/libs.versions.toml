@@ -3,6 +3,9 @@ junit = "5.14.4"
 assertj = "3.27.7"
 jqwik = "1.10.1"
 awaitility = "4.3.0"
+javalin = "7.2.3"
+jackson = "2.22.3"
+slf4j = "2.0.20"
 
 [libraries]
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
@@ -11,3 +14,8 @@ junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher
 assertj-core = { module = "org.assertj:assertj-core", version.ref = "assertj" }
 jqwik = { module = "net.jqwik:jqwik", version.ref = "jqwik" }
 awaitility = { module = "org.awaitility:awaitility", version.ref = "awaitility" }
+javalin = { module = "io.javalin:javalin", version.ref = "javalin" }
+javalin-testtools = { module = "io.javalin:javalin-testtools", version.ref = "javalin" }
+jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
+jackson-jsr310 = { module = "com.fasterxml.jackson.datatype:jackson-datatype-jsr310", version.ref = "jackson" }
+slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
