@@ -7,6 +7,7 @@ javalin = "7.2.3"
 jackson = "2.22.3"
 slf4j = "2.0.20"
 prometheus = "1.9.0"
+hdrhistogram = "2.2.2"
 
 [libraries]
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
@@ -22,3 +23,4 @@ jackson-jsr310 = { module = "com.fasterxml.jackson.datatype:jackson-datatype-jsr
 slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
 prometheus-core = { module = "io.prometheus:prometheus-metrics-core", version.ref = "prometheus" }
 prometheus-textformats = { module = "io.prometheus:prometheus-metrics-exposition-textformats", version.ref = "prometheus" }
+hdrhistogram = { module = "org.hdrhistogram:HdrHistogram", version.ref = "hdrhistogram" }
