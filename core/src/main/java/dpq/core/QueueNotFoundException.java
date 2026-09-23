@@ -1,4 +1,4 @@
-package com.keychain.dpq.core;
+package dpq.core;
 
 /** Unknown queue (HTTP 404). */
 public final class QueueNotFoundException extends DpqException {

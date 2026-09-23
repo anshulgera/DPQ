@@ -1,4 +1,4 @@
-package com.keychain.dpq.core;
+package dpq.core;
 
 import java.util.random.RandomGenerator;
 

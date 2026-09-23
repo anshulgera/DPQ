@@ -1,4 +1,4 @@
-package com.keychain.dpq.core;
+package dpq.core;
 
 /** The queue exists with a different resolved config (HTTP 409, D11c). */
 public final class QueueAlreadyExistsException extends DpqException {
