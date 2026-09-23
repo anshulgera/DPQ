@@ -60,6 +60,11 @@ final class Lane {
         return Optional.ofNullable(next);
     }
 
+    /** The entry {@link #poll} would return next, without removing it. */
+    Optional<Entry> peek() {
+        return Optional.empty();
+    }
+
     /** The live entry with the lowest seq, without removing it; used for oldest-message age. */
     Optional<Entry> peekOldest() {
         purgeDeadHeads();
