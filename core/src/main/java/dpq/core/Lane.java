@@ -62,7 +62,8 @@ final class Lane {
 
     /** The entry {@link #poll} would return next, without removing it. */
     Optional<Entry> peek() {
-        return Optional.empty();
+        purgeDeadHeads();
+        return Optional.ofNullable(retry.isEmpty() ? main.peekFirst() : retry.peek());
     }
 
     /** The live entry with the lowest seq, without removing it; used for oldest-message age. */
