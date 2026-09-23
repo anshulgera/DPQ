@@ -123,6 +123,14 @@ public final class QueueService implements AutoCloseable {
         q.partitions().get(id.partition()).ack(id, receipt);
     }
 
+    public QueueMetricsSnapshot metrics(String queue) {
+        throw new UnsupportedOperationException("not implemented");
+    }
+
+    public java.util.List<QueueMetricsSnapshot> metricsAll() {
+        throw new UnsupportedOperationException("not implemented");
+    }
+
     /** Fully drains every partition; the reaper's task (D6). */
     void sweep() {
         for (Queue queue : queues.values()) {
