@@ -1,4 +1,4 @@
-# Keychain DPQ
+# DPQ — Distributed Priority Queue
 
 An in-memory priority queue service in Java 21. Design decisions live in `decisions.md` (referenced as D1, D8d, …); the implementation plan and PR stack live in `plan.md`. Read both before changing code. `Requirements.txt` is the original brief.
 

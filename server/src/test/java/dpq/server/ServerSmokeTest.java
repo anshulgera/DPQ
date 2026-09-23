@@ -1,10 +1,10 @@
-package com.keychain.dpq.harness;
+package dpq.server;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
 
-class HarnessSmokeTest {
+class ServerSmokeTest {
 
     @Test
     void testsRunOnTheJava21Toolchain() {

@@ -1,4 +1,4 @@
-package com.keychain.dpq.core;
+package dpq.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
