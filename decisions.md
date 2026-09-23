@@ -478,7 +478,7 @@ These gaps came up when the execution session started. The author resolved them,
   - A DLQ has a **fixed** internal config: 30s visibility timeout, unlimited deliveries, no `maxDepth`. It never derives anything from its source queue's config.
   - The DLQ is marked by a separate **internal flag**, not by out-of-range `QueueConfig` values, so user-facing validation stays strict and a DLQ can't be created through the public path.
   - Because the DLQ config is fixed, registering `X.dlq` with `putIfAbsent` before `computeIfAbsent(X)` is idempotent and race-free, even when concurrent creates of `X` use different configs.
-  - `GET /queues/X.dlq` returns the **messages in the DLQ** (a read-only view that creates no lease and doesn't change visibility), not a config. The exact shape (paging, cap, whether in-flight messages are included) will be settled before PR 10.
+  - `GET /queues/X.dlq` returns the **messages in the DLQ** (a read-only view that creates no lease and doesn't change visibility), not a config. It lists both ready and in-flight messages, each with a `state` field (`READY` / `IN_FLIGHT`), capped by a `limit` query parameter (default and maximum 100). There is no cursor paging; a DLQ larger than the limit is drained by dequeuing.
 - **D18c — Dead-lettered message identity (refines D9a):**
   - A dead-lettered message **keeps its original message ID**.
   - Its `enqueuedAt` is set to the **dead-letter time**, so the DLQ's oldest-message age measures how long failures have been waiting there.
@@ -490,3 +490,4 @@ These gaps came up when the execution session started. The author resolved them,
   - Payload-size, TTL and config validation live in `core` (`ValidationException`). The HTTP layer maps them to 400 and adds only transport checks (JSON shape, a missing priority).
   - The 1,000-user-queue cap is enforced with an atomic reservation, so concurrent creates of different queues can't go over it. DLQs don't count toward the cap.
   - Awaitility is a test dependency, used only for the real-scheduler reaper test (PR 6).
+- **D18g — PR 5 split (refines D16):** PR 5 is split into **5a** (visibility timeout, redelivery, the DLQ sink, the drain limit) and **5b** (TTL) to stay near the ~400-line PR budget.
