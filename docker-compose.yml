@@ -1,0 +1,34 @@
+# The service plus Prometheus scraping it (D14c). The harness runs on demand:
+#   docker compose --profile harness run --rm harness
+services:
+  dpq:
+    build: .
+    image: dpq:local
+    ports:
+      - "8080:8080"
+    environment:
+      DPQ_PORT: "8080"
+      DPQ_REAPER_INTERVAL_MS: "100"
+
+  prometheus:
+    image: prom/prometheus:v3.14.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - dpq
+
+  harness:
+    image: dpq:local
+    profiles: ["harness"]
+    depends_on:
+      dpq:
+        condition: service_healthy
+    entrypoint: ["/opt/dpq/harness/bin/harness"]
+    command:
+      - --base-url=http://dpq:8080
+      - --producers=8
+      - --consumers=8
+      - --messages=20000
+      - --crash-rate=0.05

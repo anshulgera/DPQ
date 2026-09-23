@@ -1,0 +1,8 @@
+.git
+.github
+.gradle
+**/build
+**/.jqwik-database
+.idea
+*.iml
+.DS_Store

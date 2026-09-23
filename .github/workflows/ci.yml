@@ -28,3 +28,15 @@ jobs:
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v6
       - run: ./gradlew :core:stressTest --console=plain
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker build -t dpq:ci .
+      - name: Smoke-test the image
+        run: |
+          docker run -d --name dpq -p 8080:8080 dpq:ci
+          for i in $(seq 1 30); do curl -sf localhost:8080/health && exit 0; sleep 1; done
+          docker logs dpq
+          exit 1
