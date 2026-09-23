@@ -128,6 +128,10 @@ public final class QueueService implements AutoCloseable {
         q.partitions().get(id.partition()).ack(id, receipt);
     }
 
+    public List<MessageView> listMessages(String queue, int limit) {
+        throw new UnsupportedOperationException("not implemented");
+    }
+
     /** One queue's metrics; with one partition per queue (D5b), that partition's snapshot. */
     public QueueMetricsSnapshot metrics(String queue) {
         return require(queue).partitions().get(0).snapshot();
