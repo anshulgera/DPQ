@@ -24,4 +24,10 @@ public record Message(
         DeadLetterInfo deadLetter) {
 
     public static final long NO_EXPIRY = Long.MAX_VALUE;
+
+    /** A copy with one more delivery counted (D8b). */
+    Message delivered() {
+        return new Message(id, payload, priority, seq, enqueuedAtMono, enqueuedAt, expiresAtMono, deliveryCount + 1,
+                deadLetter);
+    }
 }
