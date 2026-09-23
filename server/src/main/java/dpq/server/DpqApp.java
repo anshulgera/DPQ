@@ -17,7 +17,6 @@ import dpq.core.model.MessageId;
 import dpq.core.model.QueueConfig;
 import dpq.core.model.QueueDescription;
 import dpq.core.model.ReceiptHandle;
-import dpq.core.time.Clock;
 import dpq.server.Dtos.AckRequest;
 import dpq.server.Dtos.CreateQueueRequest;
 import dpq.server.Dtos.DequeueResponse;

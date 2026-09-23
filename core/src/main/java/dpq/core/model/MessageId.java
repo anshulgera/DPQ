@@ -1,6 +1,5 @@
 package dpq.core.model;
 
-import dpq.core.Message;
 import dpq.core.error.ValidationException;
 import java.util.Objects;
 import java.util.UUID;
