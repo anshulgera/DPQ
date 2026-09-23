@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import java.util.UUID;
+import java.util.random.RandomGenerator;
 import org.junit.jupiter.api.Test;
 
 class UuidV7Test {
@@ -57,6 +58,22 @@ class UuidV7Test {
         UUID second = generator.next();
 
         assertThat(second.toString()).isGreaterThan(first.toString());
+    }
+
+    @Test
+    void borrowsTheNextMillisecondWhenTheRandomFieldIsExhausted() {
+        RandomGenerator allOnes = () -> -1L; // starts the 74-bit random field at its maximum
+        UuidV7 saturated = new UuidV7(clock, allOnes);
+        long now = clock.wallTime().toEpochMilli();
+
+        UUID first = saturated.next();
+        UUID second = saturated.next();
+
+        assertThat(timestampOf(first)).isEqualTo(now);
+        assertThat(timestampOf(second)).isEqualTo(now + 1);
+        assertThat(second.toString()).isGreaterThan(first.toString());
+        assertThat(second.version()).isEqualTo(7);
+        assertThat(second.variant()).isEqualTo(2);
     }
 
     private static long timestampOf(UUID uuid) {

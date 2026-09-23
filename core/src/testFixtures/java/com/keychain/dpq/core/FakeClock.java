@@ -2,22 +2,33 @@ package com.keychain.dpq.core;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.atomic.AtomicLong;
 
+/** Manual clock for tests (D6). Monotonic and wall time move together, only through {@link #advance}. */
 public final class FakeClock implements Clock {
 
-    public FakeClock(Instant start) {}
+    private final Instant start;
+    private final AtomicLong elapsedMillis = new AtomicLong();
 
+    public FakeClock(Instant start) {
+        this.start = start;
+    }
+
+    /** Moves time forward; safe to call from any thread. */
     public void advance(Duration amount) {
-        throw new UnsupportedOperationException("not implemented");
+        if (amount.isNegative()) {
+            throw new IllegalArgumentException("a clock can't go backwards: " + amount);
+        }
+        elapsedMillis.addAndGet(amount.toMillis());
     }
 
     @Override
     public long monotonicMillis() {
-        throw new UnsupportedOperationException("not implemented");
+        return elapsedMillis.get();
     }
 
     @Override
     public Instant wallTime() {
-        throw new UnsupportedOperationException("not implemented");
+        return start.plusMillis(elapsedMillis.get());
     }
 }

@@ -2,12 +2,17 @@ package com.keychain.dpq.core;
 
 import java.util.random.RandomGenerator;
 
+/** Production {@link IdGenerator}: UUIDv7 IDs, unique across nodes without coordination (D11a). */
 public final class RandomIdGenerator implements IdGenerator {
 
-    public RandomIdGenerator(Clock clock, RandomGenerator random) {}
+    private final UuidV7 uuids;
+
+    public RandomIdGenerator(Clock clock, RandomGenerator random) {
+        this.uuids = new UuidV7(clock, random);
+    }
 
     @Override
     public MessageId next(int partition) {
-        throw new UnsupportedOperationException("not implemented");
+        return new MessageId(partition, uuids.next());
     }
 }
