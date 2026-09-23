@@ -2,11 +2,11 @@ package dpq.harness;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import dpq.core.Clock;
 import dpq.core.QueueService;
-import dpq.core.RandomIdGenerator;
-import dpq.core.RandomReceiptGenerator;
-import dpq.core.SystemClock;
+import dpq.core.id.RandomIdGenerator;
+import dpq.core.id.RandomReceiptGenerator;
+import dpq.core.time.Clock;
+import dpq.core.time.SystemClock;
 import dpq.server.DpqApp;
 import io.javalin.Javalin;
 import java.security.SecureRandom;

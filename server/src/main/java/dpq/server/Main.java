@@ -1,10 +1,10 @@
 package dpq.server;
 
-import dpq.core.Clock;
 import dpq.core.QueueService;
-import dpq.core.RandomIdGenerator;
-import dpq.core.RandomReceiptGenerator;
-import dpq.core.SystemClock;
+import dpq.core.id.RandomIdGenerator;
+import dpq.core.id.RandomReceiptGenerator;
+import dpq.core.time.Clock;
+import dpq.core.time.SystemClock;
 import io.javalin.Javalin;
 import java.security.SecureRandom;
 import java.time.Duration;

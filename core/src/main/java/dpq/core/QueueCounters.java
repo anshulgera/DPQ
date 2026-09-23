@@ -1,5 +1,7 @@
 package dpq.core;
 
+import dpq.core.model.Priority;
+
 /**
  * A partition's event counters and rates (D12). Plain fields, because every update already happens under the
  * partition lock (D5). Not thread-safe on its own.

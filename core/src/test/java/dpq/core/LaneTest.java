@@ -2,6 +2,7 @@ package dpq.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dpq.core.model.MessageId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;

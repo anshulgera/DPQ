@@ -1,8 +1,8 @@
 package dpq.server;
 
-import dpq.core.Priority;
-import dpq.core.QueueMetricsSnapshot;
 import dpq.core.QueueService;
+import dpq.core.model.Priority;
+import dpq.core.model.QueueMetricsSnapshot;
 import io.prometheus.metrics.model.registry.MultiCollector;
 import io.prometheus.metrics.model.snapshots.CounterSnapshot;
 import io.prometheus.metrics.model.snapshots.CounterSnapshot.CounterDataPointSnapshot;

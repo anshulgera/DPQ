@@ -1,5 +1,8 @@
 package dpq.core;
 
+import dpq.core.model.DeadLetterInfo;
+import dpq.core.model.MessageId;
+import dpq.core.model.Priority;
 import java.time.Instant;
 
 /**
@@ -12,7 +15,7 @@ import java.time.Instant;
  * @param deliveryCount  deliveries so far, including the current one (D8b)
  * @param deadLetter     dead-letter metadata, or {@code null} unless the message is in a DLQ (D18c)
  */
-public record Message(
+record Message(
         MessageId id,
         String payload,
         Priority priority,

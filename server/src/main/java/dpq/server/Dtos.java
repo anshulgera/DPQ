@@ -1,12 +1,12 @@
 package dpq.server;
 
-import dpq.core.DeadLetterInfo;
-import dpq.core.DeliveredMessage;
-import dpq.core.MessageState;
-import dpq.core.MessageView;
-import dpq.core.Priority;
-import dpq.core.QueueDescription;
-import dpq.core.QueueMetricsSnapshot;
+import dpq.core.model.DeadLetterInfo;
+import dpq.core.model.DeliveredMessage;
+import dpq.core.model.MessageState;
+import dpq.core.model.MessageView;
+import dpq.core.model.Priority;
+import dpq.core.model.QueueDescription;
+import dpq.core.model.QueueMetricsSnapshot;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;

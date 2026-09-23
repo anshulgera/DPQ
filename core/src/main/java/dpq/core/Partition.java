@@ -1,12 +1,29 @@
 package dpq.core;
 
+import dpq.core.error.MessageNotFoundException;
+import dpq.core.error.QueueFullException;
+import dpq.core.error.StaleReceiptException;
+import dpq.core.error.ValidationException;
+import dpq.core.id.IdGenerator;
+import dpq.core.id.ReceiptGenerator;
+import dpq.core.model.DeadLetterInfo;
+import dpq.core.model.DeadLetterReason;
+import dpq.core.model.DeliveredMessage;
+import dpq.core.model.MessageId;
+import dpq.core.model.MessageState;
+import dpq.core.model.MessageView;
+import dpq.core.model.Priority;
+import dpq.core.model.QueueConfig;
+import dpq.core.model.QueueMetricsSnapshot;
+import dpq.core.model.ReceiptHandle;
+import dpq.core.time.Clock;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumMap;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -20,7 +37,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * the lanes, the message index, the lease map and the deadline sets always change together.
  *
  * <p>Every operation first drains up to {@code drainLimit} expired leases and TTLs, so correctness never
- * depends on a timer; the reaper calls {@link #drainExpired} with no limit to keep idle partitions current (D6).
+ * depends on a timer; the reaper calls {@link #drainExpired} until nothing is due to keep idle partitions current (D6).
  *
  * <p>Lock order: a source partition calls its {@link DeadLetterSink} while holding its own lock, and the sink
  * takes the DLQ partition's lock. A DLQ never has a DLQ of its own, so the order is acyclic (D9a).

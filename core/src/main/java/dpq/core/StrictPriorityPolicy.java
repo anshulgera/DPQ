@@ -1,5 +1,6 @@
 package dpq.core;
 
+import dpq.core.model.Priority;
 import java.util.EnumMap;
 import java.util.Optional;
 

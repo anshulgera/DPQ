@@ -1,5 +1,6 @@
 package dpq.core;
 
+import dpq.core.model.MessageId;
 import java.util.ArrayDeque;
 import java.util.Comparator;
 import java.util.Optional;
