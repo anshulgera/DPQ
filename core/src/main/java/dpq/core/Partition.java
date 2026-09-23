@@ -67,6 +67,18 @@ final class Partition {
         }
     }
 
+    MessageId enqueue(String payload, Priority priority, java.time.Duration ttl) {
+        return enqueue(payload, priority);
+    }
+
+    int expiredCount() {
+        return 0;
+    }
+
+    int ttlDeadlineCount() {
+        return 0;
+    }
+
     MessageId enqueue(String payload, Priority priority) {
         validate(payload, priority);
         lock.lock();
