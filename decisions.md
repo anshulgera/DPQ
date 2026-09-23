@@ -485,9 +485,9 @@ These gaps came up when the execution session started. The author resolved them,
   - Dequeuing from a DLQ returns the dead-letter metadata (`sourceQueue`, source `deliveryCount`, `reason`, `deadLetteredAt`) in the response.
 - **D18d — Two enqueue timestamps (refines D6, D12a):** each message stores a monotonic `enqueuedAtMono`, used to compute oldest age, and a wall-clock `enqueuedAt`, used only for display. An NTP step therefore can't make an age negative.
 - **D18e — Lane tombstones (refines D4, plan PR 3):** `Entry` carries a mutable `dead` flag. `Lane.markDead(entry)` sets it and increments the tombstone count, and `poll()` / `peekOldest()` skip dead entries without an outside predicate. Compaction removes the flagged entries once they exceed 50% of the lane.
-- **D18g — PR 5 split (refines D16):** PR 5 is split into **5a** (visibility timeout, redelivery, the DLQ sink) and **5b** (TTL and the drain limit) to stay near the ~400-line PR budget.
 - **D18f — Smaller defaults:**
   - `FakeClock`'s "now" means `monotonicMillis()`, and `advance` moves monotonic and wall time together.
   - Payload-size, TTL and config validation live in `core` (`ValidationException`). The HTTP layer maps them to 400 and adds only transport checks (JSON shape, a missing priority).
   - The 1,000-user-queue cap is enforced with an atomic reservation, so concurrent creates of different queues can't go over it. DLQs don't count toward the cap.
   - Awaitility is a test dependency, used only for the real-scheduler reaper test (PR 6).
+- **D18g — PR 5 split (refines D16):** PR 5 is split into **5a** (visibility timeout, redelivery, the DLQ sink) and **5b** (TTL and the drain limit) to stay near the ~400-line PR budget.
