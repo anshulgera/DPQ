@@ -6,6 +6,7 @@ awaitility = "4.3.0"
 javalin = "7.2.3"
 jackson = "2.22.3"
 slf4j = "2.0.20"
+prometheus = "1.9.0"
 
 [libraries]
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
@@ -19,3 +20,5 @@ javalin-testtools = { module = "io.javalin:javalin-testtools", version.ref = "ja
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
 jackson-jsr310 = { module = "com.fasterxml.jackson.datatype:jackson-datatype-jsr310", version.ref = "jackson" }
 slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
+prometheus-core = { module = "io.prometheus:prometheus-metrics-core", version.ref = "prometheus" }
+prometheus-textformats = { module = "io.prometheus:prometheus-metrics-exposition-textformats", version.ref = "prometheus" }

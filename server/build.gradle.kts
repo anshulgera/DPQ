@@ -9,6 +9,8 @@ dependencies {
     implementation(libs.javalin)
     implementation(libs.jackson.databind)
     implementation(libs.jackson.jsr310)
+    implementation(libs.prometheus.core)
+    implementation(libs.prometheus.textformats)
     runtimeOnly(libs.slf4j.simple)
 
     testImplementation(testFixtures(project(":core")))

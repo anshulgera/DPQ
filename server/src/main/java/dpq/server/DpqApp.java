@@ -52,6 +52,10 @@ public final class DpqApp {
 
     private DpqApp() {}
 
+    public static Javalin create(QueueService service, java.util.function.LongSupplier nanoTicker) {
+        return create(service);
+    }
+
     public static Javalin create(QueueService service) {
         return Javalin.create(config -> {
             config.jsonMapper(new JavalinJackson(JSON, false));
