@@ -89,6 +89,8 @@ QueueService ── ConcurrentHashMap<String, Queue>          "orders", "orders.
                                └─ counters + 60s sliding-window rates (plain longs)
 ```
 
+Code layout (D18l): `dpq.core` holds the `QueueService` facade and the package-private engine (`Partition`, `Lane`, `Message`, `Reaper`, counters, `SelectionPolicy`). The public value types are in `dpq.core.model`, the exceptions in `dpq.core.error`, the ID and receipt generators in `dpq.core.id`, and `Clock` in `dpq.core.time`.
+
 Why this shape (D4):
 
 - **Three lanes, not one sorted set.** Enqueue and dequeue are O(1) apart from deadline bookkeeping, FIFO within a priority comes from the structure itself, and the oldest-message age is O(1): the head of each lane.
@@ -99,12 +101,13 @@ Why this shape (D4):
 
 ## Concurrency model
 
-- **One `ReentrantLock` per partition** guards all of that partition's state (D5). The lanes, the index, the leases and the deadline sets must change together, and a single lock makes those invariants easy to reason about and to test. Critical sections cost O(log n) per message they touch, and the expiry drain at the start of an operation touches at most K messages. Queues never contend with each other: the registry is a `ConcurrentHashMap`, and the lock boundary is also the future shard boundary.
+- **One `ReentrantLock` per partition** guards all of that partition's state (D5). The lanes, the index, the leases and the deadline sets must change together, and a single lock makes those invariants easy to reason about and to test. Critical sections cost O(log n) per message they touch, and the expiry drain at the start of an operation touches at most K messages, plus any expired lane heads it must skip (D18k). Each message expires only once, so skipping heads just does the drain's work early. Queues never contend with each other: the registry is a `ConcurrentHashMap`, and the lock boundary is also the future shard boundary.
 - **Counters are plain `long`s under that lock.** Every update already holds it, so `LongAdder` would add nothing, and a ring of `LongAdder` buckets would bring a bucket-reset race.
 - **Lock order is source → DLQ.** Dead-lettering runs under the source partition's lock and takes the DLQ's lock, so a message is never in neither queue. A DLQ has no DLQ of its own, so the order is acyclic and can't deadlock (D9a).
 - **Expiry is lazy plus a reaper** (D6):
   - Every operation first drains up to K = 256 expired leases and TTLs, so correctness never depends on a timer firing. The bound keeps a mass expiry (a whole consumer fleet dying at once) from turning one dequeue into a long critical section.
-  - A single reaper thread fully drains every partition every 100ms, so idle queues still redeliver, dead-letter and report accurate metrics.
+  - A single reaper thread drains every partition every 100ms, in chunks of K that release the lock between them, so idle queues still redeliver, dead-letter and report accurate metrics without one long critical section.
+  - Before serving or measuring, an operation also expires any lane head whose TTL has passed (D18k). A drain bounded by K can leave due TTLs behind, and an expired message must never be delivered.
 - **Time comes from an injected `Clock`.** Deadlines use a monotonic reading, so an NTP step can't shorten a lease. Each operation reads the clock **once** and derives any displayed wall-clock time from that same instant (D18j).
 - **Rules are judged at the deadline, not at drain time** (D18i). If a lease ended before the message's TTL, the message is redelivered or dead-lettered even when the drain that notices it runs after the TTL. The outcome never depends on reaper timing.
 
@@ -147,11 +150,11 @@ What happens in each situation (D8d):
 | `dpq_messages_dead_lettered_total` | counter | – | Poison messages |
 | `dpq_messages_expired_total` | counter | `priority` | Work that went stale before anyone did it |
 | `dpq_enqueue_rejected_total` | counter | – | Back-pressure (queue full) |
-| `dpq_operation_duration_seconds` | histogram | `op` | Server-side latency of enqueue, dequeue and ack, against the p95 < 100ms target |
+| `dpq_operation_duration_seconds` | histogram | `op` | Server-side latency of enqueue, dequeue and ack, against the p95 < 100ms target; also labelled by `queue` |
 
 - **Computed when scraped.** Values come from the queues at scrape time (a custom `MultiCollector`), so gauges are never stale, nothing runs between scrapes, and new queues appear without registration. Each queue costs O(1) under its lock: the lane sizes, the lane heads and the counters. The oldest age takes the head of each lane, and a redelivered message keeps its original enqueue time.
 - **Counters are cumulative** (`_total`), so Prometheus `rate()` works and sums across instances. For the spec's "messages per second", the JSON view also has `enqueueRatePerSec` and `ackRatePerSec` over the last 60 complete seconds, from a ring of one-second buckets (D12b).
-- **Label cardinality is bounded.** There are at most 1,000 user queues per node. A request path naming an unknown queue never becomes a label value.
+- **Label cardinality is bounded.** There are at most 1,000 user queues per node. A request path naming an unknown queue never becomes a label value. The histogram is the largest family: queues × 3 ops × 13 buckets, about 40k series per node at the cap. Dropping its `queue` label is the first lever if that is too many.
 - **Idle queues lag slightly.** Their metrics can be up to one reaper interval (100ms) old.
 
 ## Testing
@@ -160,7 +163,7 @@ Tests run at five layers, each aimed at a different kind of bug:
 
 | Layer | Where | What it proves |
 |---|---|---|
-| Unit tests with a `FakeClock` (no sleeps) | `core`, 146 tests including the property below | Every rule and boundary: deadline − 1ms vs at the deadline, each D8d row, TTL × DLQ precedence, limits, idempotent create, the DLQ, metrics, the sliding window |
+| Unit tests with a `FakeClock` (no sleeps) | `core`, 150 tests including the property below | Every rule and boundary: deadline − 1ms vs at the deadline, each D8d row, TTL × DLQ precedence, limits, idempotent create, the DLQ, metrics, the sliding window |
 | Model-based tests (jqwik, 1,000 random action sequences) | `QueueModelProperties` | The real service matches a deliberately naive `ModelQueue` written from the spec and D8d, step by step: IDs, receipts, deliveries, errors and full metrics snapshots |
 | Stress tests, `@Tag("stress")`, 60 runs | `ConservationStressTest`, `PriorityOrderingStressTest` | Under real contention with the reaper and a moving clock: conservation (acked + DLQ + expired = enqueued, exactly once), lease exclusivity, counters equal ground truth, liveness, and no priority inversion (phase and interleaved, via the delivery sequence) |
 | HTTP tests (javalin-testtools, random port) | `server`, 17 tests | Every API row, the error codes, the Prometheus exposition format and values, and the histogram |
@@ -170,6 +173,7 @@ Tests run at five layers, each aimed at a different kind of bug:
 
 1. **Found by the model-based tests** (D18i). Lease expiry was judged at drain time instead of at the lease deadline. A lease that ended before its TTL was dropped as *expired* when the drain ran after the TTL, instead of being redelivered or dead-lettered. jqwik found it within three tries and shrank it to a 7-step reproduction.
 2. **Found by the stress test** (D18j). `visibleUntil` came from a second clock reading, so it could promise a lease 1ms longer than the real one.
+3. **Found in review** (D18k). Each operation drains at most K due deadlines, so with more than K TTLs due at once, dequeue could serve a message whose TTL had passed. The model-based tests missed it because they run with an unlimited drain; the regression tests use a drain limit of 1.
 
 The priority-ordering stress tests were also checked against a deliberately broken priority policy, to make sure they fail when they should: all 40 runs did.
 
@@ -196,9 +200,9 @@ This build is one process. Here is how the design extends (D15).
 - A stateless gateway or smart client routes requests by queue name. An ack is routed by the partition prefix in the message ID, with no lookup. A wrong-owner response triggers a map refresh.
 - A hot queue is split into N partitions. Consumers are **assigned** partitions, Kafka-style, rather than the server fanning each dequeue out across nodes.
 - Priority stays strict within a partition and becomes approximate across partitions. The spec's "should usually receive the highest-priority message" allows this.
-- The code already has the seam: `Queue → Partition`, the partition prefix in IDs, and partition-local locks, reaper work and metrics.
+- What the code has today: a `Queue → List<Partition>` shape, the partition prefix in IDs (acks already route by it), and partition-local locks, reaper work and metrics. What it doesn't have yet: more than one partition per queue, choosing between partitions on dequeue, and summing metrics across them.
 
-**Durability.** The engine sits behind a store seam, so persistence is an addition rather than a rewrite:
+**Durability.** There is no storage interface today: `Partition` owns its collections directly. Every state change, though, goes through a handful of methods under one lock (enqueue, dequeue, ack, lease expiry, TTL expiry, dead-letter), and those are the WAL append points. Persistence means adding a log call to each and a replay on startup:
 
 - The **durable** transitions (enqueue, ack, expire, dead-letter) become entries in a write-ahead log per partition, replicated by Raft across three replicas. Group commit keeps p95 under 100ms.
 - **Deliveries and leases are deliberately not replicated.** Dequeue stays a local, leader-only operation with no consensus round trip per delivery.
