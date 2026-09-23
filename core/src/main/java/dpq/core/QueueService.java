@@ -165,10 +165,11 @@ public final class QueueService implements AutoCloseable {
         boolean isDlq = dlq == null;
         // Lock order source → DLQ: the sink runs under the source partition's lock and takes the DLQ's (D9a).
         DeadLetterSink sink = isDlq
-                ? (message, info) -> {
+                ? (message, info, at) -> {
                     throw new IllegalStateException("a dead-letter queue has no dead-letter queue");
                 }
-                : (message, info) -> dlq.partitions().get(message.id().partition()).acceptDeadLetter(message, info);
+                : (message, info, at) ->
+                        dlq.partitions().get(message.id().partition()).acceptDeadLetter(message, info, at);
         Partition partition = new Partition(name, 0, config, isDlq, clock, ids, receipts,
                 new StrictPriorityPolicy(), sink, options.drainLimit());
         return new Queue(new QueueDescription(name, config, isDlq), List.of(partition));

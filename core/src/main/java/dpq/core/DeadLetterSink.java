@@ -6,5 +6,9 @@ package dpq.core;
  */
 interface DeadLetterSink {
 
-    void deadLetter(Message message, DeadLetterInfo info);
+    /**
+     * @param deadLetteredAtMono monotonic time the lease ended, which is when the message was dead-lettered,
+     *                           whenever the drain that noticed it ran
+     */
+    void deadLetter(Message message, DeadLetterInfo info, long deadLetteredAtMono);
 }
