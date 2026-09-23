@@ -7,4 +7,5 @@ plugins {
 
 dependencies {
     testImplementation(libs.jqwik)
+    testImplementation(libs.awaitility)
 }
