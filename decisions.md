@@ -137,7 +137,7 @@ The gap is **durability** (D3), not scale. A single hot queue needs partitions, 
   - The bound on K stops a mass expiry (a whole consumer fleet dying at once) from turning the next dequeue into a long critical section that breaks p95.
 - **Consequences:**
   - On an idle queue, metrics can lag by up to one reaper interval.
-  - The reaper briefly takes each partition's lock. After a mass expiry, it can hold the lock for one full drain.
+  - The reaper briefly takes each partition's lock. It drains in chunks of K and releases the lock between them, so even after a mass expiry it never holds a partition's lock for more than one chunk.
   - Under a mass expiry, some redeliveries appear up to one reaper interval late. This affects liveness only: an undrained message stays invisible, so it is never delivered twice.
 
 ## D7 — Priority policy: strict, behind a pluggable SelectionPolicy
