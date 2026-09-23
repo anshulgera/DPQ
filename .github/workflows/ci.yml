@@ -1,0 +1,19 @@
+name: CI
+
+# No branch filter on pull_request: stacked PRs target pr/* branches and must be tested too (D16).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v6
+      - run: ./gradlew check --console=plain
