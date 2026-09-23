@@ -39,6 +39,10 @@ public final class QueueService implements AutoCloseable {
         public Options withMaxQueues(int max) {
             return new Options(max, drainLimit, reaperInterval);
         }
+
+        public Options withDrainLimit(int limit) {
+            return new Options(maxQueues, limit, reaperInterval);
+        }
     }
 
     private record Queue(QueueDescription description, List<Partition> partitions) {}
