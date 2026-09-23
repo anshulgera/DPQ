@@ -1,0 +1,7 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: dpq
+    static_configs:
+      - targets: ["dpq:8080"]
