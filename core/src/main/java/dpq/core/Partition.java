@@ -2,6 +2,7 @@ package dpq.core;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumMap;
@@ -118,18 +119,17 @@ final class Partition {
      * Adds a message dead-lettered by the source queue (D9a, D18c): same ID, payload and priority; no TTL; a
      * fresh delivery count; {@code enqueuedAt} is the dead-letter time. Called under the source partition's lock.
      */
-    void acceptDeadLetter(Message source, DeadLetterInfo info) {
+    void acceptDeadLetter(Message source, DeadLetterInfo info, long deadLetteredAtMono) {
         if (!deadLetterQueue) {
             throw new IllegalStateException(queueName + " is not a dead-letter queue");
         }
         lock.lock();
         try {
-            long now = clock.monotonicMillis();
-            Message message = new Message(source.id(), source.payload(), source.priority(), nextSeq++, now,
-                    info.deadLetteredAt(), Message.NO_EXPIRY, 0, info);
+            Message message = new Message(source.id(), source.payload(), source.priority(), nextSeq++,
+                    deadLetteredAtMono, info.deadLetteredAt(), Message.NO_EXPIRY, 0, info);
             messages.put(message.id(), message);
             makeReady(message, false);
-            counters.enqueued(message.priority(), now);
+            counters.enqueued(message.priority(), deadLetteredAtMono);
         } finally {
             lock.unlock();
         }
@@ -289,7 +289,7 @@ final class Partition {
             }
             if (ttl == null || (lease != null && DEADLINE_ORDER.compare(lease, ttl) <= 0)) {
                 visibilityDeadlines.pollFirst();
-                expireLease(lease.id(), now);
+                expireLease(lease.id(), lease.at(), now);
             } else {
                 ttlDeadlines.pollFirst();
                 expireReady(ttl.id());
@@ -305,19 +305,23 @@ final class Partition {
 
     /**
      * Applies the D8d lease-expiry rows in order: TTL passed → dropped as expired; deliveries used up →
-     * dead-lettered; otherwise → redelivered in its original position.
+     * dead-lettered; otherwise → redelivered in its original position. The rows are judged at the lease
+     * deadline {@code at}, not at the (possibly later) drain time {@code now}, so the outcome doesn't depend on
+     * when a drain happens to run. A redelivered message whose TTL passed between {@code at} and {@code now}
+     * expires later in the same drain.
      */
-    private void expireLease(MessageId id, long now) {
+    private void expireLease(MessageId id, long at, long now) {
         inFlight.remove(id);
         Message message = messages.get(id);
-        if (now >= message.expiresAtMono()) {
+        if (message.expiresAtMono() <= at) {
             messages.remove(id);
             counters.expired[message.priority().ordinal()]++;
         } else if (message.deliveryCount() >= maxDeliveries) {
             messages.remove(id);
             counters.deadLettered++;
+            Instant deadLetteredAt = clock.wallTime().minusMillis(now - at);
             deadLetters.deadLetter(message, new DeadLetterInfo(
-                    queueName, message.deliveryCount(), DeadLetterReason.MAX_DELIVERIES, clock.wallTime()));
+                    queueName, message.deliveryCount(), DeadLetterReason.MAX_DELIVERIES, deadLetteredAt), at);
         } else {
             makeReady(message, true);
             counters.redelivered++;
